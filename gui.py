@@ -3,6 +3,9 @@ StrawPatcher GUI — Strawberry Panic! (PS2) Patcher
 Graphical interface with file selection, progress, and logging.
 """
 
+import multiprocessing
+multiprocessing.freeze_support()
+
 import os
 import sys
 import threading

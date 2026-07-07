@@ -8,6 +8,7 @@ Double click or CLI:
 
 import argparse
 import csv
+import multiprocessing
 import os
 import shutil
 import sqlite3
@@ -302,4 +303,5 @@ def main():
 
 
 if __name__ == "__main__":
+    multiprocessing.freeze_support()
     main()
