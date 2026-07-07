@@ -8,6 +8,11 @@
 
 This is an open-source, standalone patcher for the PS2 game *"Strawberry Panic!"*. Unlike the translator-oriented repository, this patcher is designed so that **end users** can easily apply the translation patch to their own copy of the game's ISO with just a few clicks.
 
+
+### Tutorial en español aqui
+
+[¿Como instalar el parche en el iso?](https://www.canva.com/design/DAHOrUyseRQ/c5uiigaEZIFXx09FVrh0EA/view?utm_content=DAHOrUyseRQ&utm_campaign=designshare&utm_medium=link2&utm_source=uniquelinks&utlId=h88ddc90a5c)
+
 ### For the End User (No Technical Knowledge Required)
 
 If you just want to apply the translation, **you don't need to install Python or use the command line**.
