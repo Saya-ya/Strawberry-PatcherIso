@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Compilación de PyInstaller
+build/
+dist/
+
+# Directorios de trabajo locales del parcheador
+work/
+output/
+input/*.iso
+input/Data.bin
+input/SLPS*
+
+# Archivos pesados que no deben subirse a git
+*.iso
+*.bin
+*.exe
+*.db
