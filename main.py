@@ -8,6 +8,7 @@ Double click or CLI:
 
 import argparse
 import csv
+import json
 import multiprocessing
 import os
 import shutil
@@ -19,7 +20,6 @@ import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
-import sys
 
 _core_dir = Path(__file__).resolve().parent / "core"
 if str(_core_dir) not in sys.path:
@@ -60,7 +60,7 @@ class Logger:
 
 
 def _compress_worker(args: tuple) -> dict:
-    script_id, csv_path, dec_dir = args
+    script_id, csv_path, dec_dir, target_lang = args
     dec_path = Path(dec_dir) / f"ID_{script_id:05d}.dec"
     if not dec_path.exists():
         return {"success": False, "script_id": script_id, "error": ".dec missing"}
@@ -70,8 +70,11 @@ def _compress_worker(args: tuple) -> dict:
     if not rows:
         return {"success": False, "script_id": script_id, "error": "no data"}
 
+    from glyph_map import get_glyph_map
+    glyph_map = get_glyph_map(target_lang)
+
     try:
-        rebuilt, report = rebuild_local_slack(dec_data, rows)
+        rebuilt, report = rebuild_local_slack(dec_data, rows, glyph_map=glyph_map)
     except Exception as e:
         return {"success": False, "script_id": script_id, "error": str(e)}
 
@@ -157,6 +160,29 @@ def patch(
                 off = f"0x{r['byte_offset']:05X}" if src == "SCRIPT" else f"0x{r['byte_offset']:06X}"
                 writer.writerow([src, fid, off, r["original_text"], r["translated_text"]])
         conn.close()
+
+        settings = {}
+        try:
+            sconn = sqlite3.connect(str(db_path))
+            sconn.row_factory = sqlite3.Row
+            for row in sconn.execute("SELECT key, value FROM settings"):
+                try:
+                    settings[row["key"]] = json.loads(row["value"])
+                except (json.JSONDecodeError, TypeError):
+                    settings[row["key"]] = row["value"]
+            sconn.close()
+        except Exception:
+            pass
+
+        target_lang = settings.get("target_lang", "es")
+        custom_glyph_map = {}
+        if target_lang == "custom":
+            try:
+                custom_glyph_map = json.loads(settings.get("custom_glyph_map", "{}"))
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        log.log(f"  Target language: {target_lang}" + (" (custom)" if target_lang == "custom" else ""))
         log.log(f"  {len(rows)} texts ({time.time()-t:.1f}s)")
 
         if len(rows) == 0:
@@ -192,7 +218,7 @@ def patch(
         compressed = {}
         ok = err = 0
 
-        items = [(sid, csv_path, str(dec_dir)) for sid in script_ids]
+        items = [(sid, csv_path, str(dec_dir), target_lang) for sid in script_ids]
         with ProcessPoolExecutor(max_workers=workers) as pool:
             futures = {pool.submit(_compress_worker, item): item[0] for item in items}
             for future in as_completed(futures):
@@ -241,7 +267,7 @@ def patch(
 
         log.log("  Applying ELF translations...")
         from apply_translation import apply_translations
-        apply_translations(csv_path, str(bin_patched), str(elf_src))
+        apply_translations(csv_path, str(bin_patched), str(elf_src), target_lang=target_lang)
 
         log.log(f"\n[5/5] Building ISO...")
         from build_iso import build_iso

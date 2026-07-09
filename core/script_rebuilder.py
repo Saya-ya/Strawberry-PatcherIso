@@ -22,7 +22,7 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 
 
-from glyph_map import SPANISH_TO_GLYPH, game_string as _game_string, encode_game_utf16 as _encode_game_utf16
+from glyph_map import SPANISH_TO_GLYPH, game_string as _game_string, encode_game_utf16 as _encode_game_utf16, get_glyph_map
 
 SPANISH_TO_GLYPH = SPANISH_TO_GLYPH 
 
@@ -61,13 +61,17 @@ class TranslationRow:
     csv_line: int
 
 
-def game_string(text: str) -> str:
-    """Converts readable Spanish to the available game glyphs."""
-    return _game_string(text)
+def game_string(text: str, glyph_map: dict | None = None) -> str:
+    """Converts readable text to the available game glyphs."""
+    if glyph_map is None:
+        return _game_string(text)
+    return _game_string(text, glyph_map)
 
 
-def encode_game_utf16(text: str) -> bytes:
-    return _encode_game_utf16(text)
+def encode_game_utf16(text: str, glyph_map: dict | None = None) -> bytes:
+    if glyph_map is None:
+        return _encode_game_utf16(text)
+    return _encode_game_utf16(text, glyph_map)
 
 
 def decode_utf16(data: bytes) -> str:
@@ -197,7 +201,8 @@ def maybe_consume_trailing_punctuation(segment_text: str, end_char: int, transla
 
 
 def apply_rows_to_segment(segment: TextSegment, rows: list[TranslationRow],
-                          consume_punctuation: bool = True) -> tuple[str, list[dict]]:
+                          consume_punctuation: bool = True,
+                          glyph_map: dict | None = None) -> tuple[str, list[dict]]:
     """
     Applies replacements to the decoded text of the segment, from right to left
     so that original offsets do not shift.
@@ -224,7 +229,7 @@ def apply_rows_to_segment(segment: TextSegment, rows: list[TranslationRow],
         if consume_punctuation:
             replace_end = maybe_consume_trailing_punctuation(text, end_char, row.translated_text)
 
-        replacements.append((start_char, replace_end, game_string(row.translated_text), row))
+        replacements.append((start_char, replace_end, game_string(row.translated_text, glyph_map), row))
         events.append({
             'csv_line': row.csv_line,
             'offset': row.offset,
@@ -251,7 +256,8 @@ def apply_rows_to_segment(segment: TextSegment, rows: list[TranslationRow],
 
 
 def rebuild_local_slack(dec_data: bytes, rows: list[TranslationRow],
-                        consume_punctuation: bool = True) -> tuple[bytes, dict]:
+                        consume_punctuation: bool = True,
+                        glyph_map: dict | None = None) -> tuple[bytes, dict]:
     """
     Applies translations using local padding. Returns (new_dec, report).
     """
@@ -278,7 +284,7 @@ def rebuild_local_slack(dec_data: bytes, rows: list[TranslationRow],
 
     for seg_start in sorted(groups):
         segment, seg_rows = groups[seg_start]
-        new_text, events = apply_rows_to_segment(segment, seg_rows, consume_punctuation)
+        new_text, events = apply_rows_to_segment(segment, seg_rows, consume_punctuation, glyph_map)
         new_bytes = new_text.encode('utf-16-le')
         required = len(new_bytes) + 2
 

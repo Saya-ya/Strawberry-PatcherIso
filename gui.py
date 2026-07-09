@@ -103,15 +103,35 @@ class StrawPatcherGUI:
         ttk.Label(opts_frame, text="(parallel processes, more = faster but uses more RAM)").grid(
             row=0, column=2, sticky=tk.W, padx=5)
 
-        ttk.Label(opts_frame, text="Output:").grid(row=1, column=0, sticky=tk.W, pady=(5, 0))
+        ttk.Label(opts_frame, text="Target:").grid(row=1, column=0, sticky=tk.W, pady=(5, 0))
+        self._target_label = ttk.Label(opts_frame, text="(select DB to detect)",
+                                       foreground="#e0a0ff", font=("Segoe UI", 10, "bold"))
+        self._target_label.grid(row=1, column=1, sticky=tk.W, padx=5, pady=(5, 0))
+
+        ttk.Label(opts_frame, text="Output:").grid(row=2, column=0, sticky=tk.W, pady=(5, 0))
         self._out_entry = ttk.Entry(opts_frame, width=55)
-        self._out_entry.grid(row=1, column=1, padx=5, pady=(5, 0), sticky=tk.EW)
+        self._out_entry.grid(row=2, column=1, padx=5, pady=(5, 0), sticky=tk.EW)
         self._out_entry.insert(0, str(DEFAULT_OUTPUT / "Strawberry_Patched.iso"))
         ttk.Button(opts_frame, text="...", width=3,
                    command=lambda: self._browse_file(self._out_entry, "*.iso", "ISO (*.iso)")
-                   ).grid(row=1, column=2, pady=(5, 0))
+                   ).grid(row=2, column=2, pady=(5, 0))
 
         opts_frame.columnconfigure(1, weight=1)
+
+        glyph_frame = ttk.LabelFrame(self.root, text=" Glyph Map ", padding=5)
+        glyph_frame.pack(fill=tk.X, padx=15, pady=5)
+
+        self._glyph_text = tk.Text(glyph_frame, height=6, bg="#0d0d1a", fg="#ff9ff3",
+                                    font=("Consolas", 9), wrap=tk.WORD, state=tk.DISABLED)
+        self._glyph_text.pack(fill=tk.BOTH, expand=True)
+
+        glyph_scroll = ttk.Scrollbar(self._glyph_text, command=self._glyph_text.yview)
+        glyph_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self._glyph_text.configure(yscrollcommand=glyph_scroll.set)
+
+        self._glyph_text.configure(state=tk.NORMAL)
+        self._glyph_text.insert(tk.END, "(select DB to load glyph map)")
+        self._glyph_text.configure(state=tk.DISABLED)
 
         btn_frame = ttk.Frame(self.root)
         btn_frame.pack(fill=tk.X, padx=15, pady=10)
@@ -164,6 +184,56 @@ class StrawPatcherGUI:
                 entry.delete(0, tk.END)
                 entry.insert(0, str(candidates[0]))
         self._log.insert(tk.END, "[INFO] Files auto-detected from input/ folder\n")
+        self._read_target_lang()
+
+    def _read_target_lang(self):
+        db_path = Path(self._entries["db"].get())
+        labels = {"es": "Spanish", "en": "English", "custom": "Custom"}
+        target_lang = "es"
+        custom_map = {}
+        if db_path.exists():
+            try:
+                import sqlite3, json
+                conn = sqlite3.connect(str(db_path))
+                conn.row_factory = lambda c, r: r
+                rows = dict(conn.execute("SELECT key, value FROM settings").fetchall())
+                conn.close()
+                for k, v in rows.items():
+                    try:
+                        rows[k] = json.loads(v)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                target_lang = rows.get("target_lang", "es")
+                custom_map = rows.get("custom_glyph_map", {})
+            except Exception:
+                pass
+
+        self._target_label.config(text=labels.get(target_lang, target_lang))
+        self._show_glyph_map(target_lang, custom_map)
+
+    def _show_glyph_map(self, target_lang: str, custom_map: dict):
+        from core.glyph_map import ES_MAP
+        self._glyph_text.configure(state=tk.NORMAL)
+        self._glyph_text.delete("1.0", tk.END)
+
+        if target_lang == "en":
+            self._glyph_text.insert(tk.END, "No glyph mapping needed (English uses only ASCII).")
+        elif target_lang == "custom":
+            if not custom_map:
+                self._glyph_text.insert(tk.END, "Custom mode — no mappings defined.\nConfigure in the webapp Settings page.")
+            else:
+                lines = []
+                for glyph, char in sorted(custom_map.items(), key=lambda x: x[1]):
+                    glyph_disp = glyph.encode("unicode_escape").decode()
+                    lines.append(f"  {char}  →  {glyph}  ({glyph_disp})")
+                self._glyph_text.insert(tk.END, "Custom glyph mapping:\n" + "\n".join(lines))
+        else:
+            lines = []
+            for char, glyph in sorted(ES_MAP.items(), key=lambda x: x[1]):
+                lines.append(f"  {char}  →  {glyph}  ({glyph.encode('unicode_escape').decode()})")
+            self._glyph_text.insert(tk.END, "Spanish glyph mapping:\n" + "\n".join(lines))
+
+        self._glyph_text.configure(state=tk.DISABLED)
 
 
     def _build(self):

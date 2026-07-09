@@ -22,19 +22,23 @@ from pathlib import Path
 from lz77 import decompress
 from patch_compressed import trace_decompression
 from datafat import read_entries, find_row
-from glyph_map import SPANISH_TO_GLYPH, game_string, encode_game_utf16 as _enc_utf16, encode_game_sjis as _enc_sjis
+from glyph_map import SPANISH_TO_GLYPH, game_string, encode_game_utf16 as _enc_utf16, encode_game_sjis as _enc_sjis, get_glyph_map
 
 SPANISH_TO_GLYPH_UTF16 = SPANISH_TO_GLYPH
 
 
-def encode_for_game_utf16(text):
-    """Converts Spanish text to UTF-16LE with Cyrillic mapping."""
-    return _enc_utf16(text)
+def encode_for_game_utf16(text, glyph_map=None):
+    """Converts text to UTF-16LE with Cyrillic mapping."""
+    if glyph_map is None:
+        return _enc_utf16(text)
+    return _enc_utf16(text, glyph_map)
 
 
-def encode_for_game_sjis(text):
-    """Converts Spanish text to Shift-JIS with Cyrillic mapping."""
-    return _enc_sjis(text)
+def encode_for_game_sjis(text, glyph_map=None):
+    """Converts text to Shift-JIS with Cyrillic mapping."""
+    if glyph_map is None:
+        return _enc_sjis(text)
+    return _enc_sjis(text, glyph_map)
 
 
 def patch_script_text(data_bin_path, file_id, dec_offset, new_bytes_utf16le):
@@ -82,8 +86,9 @@ def patch_script_text(data_bin_path, file_id, dec_offset, new_bytes_utf16le):
     return True, f"OK ({len(new_bytes_utf16le)} bytes in {len(comp_offsets)} positions)"
 
 
-def apply_translations(csv_path, data_bin_path, elf_path=None):
+def apply_translations(csv_path, data_bin_path, elf_path=None, target_lang="es"):
     """Reads the CSV and applies all translations."""
+    glyph_map = get_glyph_map(target_lang) if target_lang != "es" else None
     bin_path = Path(data_bin_path)
     if not bin_path.exists():
         print(f"ERROR: {bin_path} does not exist")
@@ -128,7 +133,7 @@ def apply_translations(csv_path, data_bin_path, elf_path=None):
                 continue
             
             if source == 'ELF':
-                new_bytes = encode_for_game_sjis(translated)
+                new_bytes = encode_for_game_sjis(translated, glyph_map)
                 orig_bytes = original.encode('shift-jis')
                 
                 if len(new_bytes) <= len(orig_bytes):
@@ -146,7 +151,7 @@ def apply_translations(csv_path, data_bin_path, elf_path=None):
             
             elif source == 'SCRIPT':
                 file_id = int(file_id_str)
-                new_bytes = encode_for_game_utf16(translated)
+                new_bytes = encode_for_game_utf16(translated, glyph_map)
                 orig_bytes = original.encode('utf-16-le')
                 
                 if len(new_bytes) > len(orig_bytes):
@@ -184,15 +189,22 @@ def apply_translations(csv_path, data_bin_path, elf_path=None):
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python apply_translation.py <dialogue.csv>")
-        print("  python apply_translation.py traduccion_tools/dialogue_scripts.csv")
+    import argparse
+    parser = argparse.ArgumentParser(
+        description='Apply translations from CSV to Data.bin and ELF')
+    parser.add_argument('csv_path', nargs='?', default=None,
+                        help='Path to translation CSV')
+    parser.add_argument('--target-lang', default='es',
+                        choices=['es', 'en', 'custom'],
+                        help='Target language (default: es)')
+    args = parser.parse_args()
+
+    if args.csv_path is None:
+        parser.print_help()
         sys.exit(1)
-    
-    csv_path = sys.argv[1]
+
     data_bin = "originales/Data.bin"
-    
-    apply_translations(csv_path, data_bin)
+    apply_translations(args.csv_path, data_bin, target_lang=args.target_lang)
 
 
 if __name__ == '__main__':
