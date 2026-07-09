@@ -24,7 +24,19 @@ If you just want to apply the translation, **you don't need to install Python or
    - Your **Original Japanese ISO**.
    - The **Translation Database file (`.db`)**.
    - The `Data.bin` and `SLPS_256.11` files (if prompted or not bundled).
-5. Click **PATCH** and wait for it to finish. That's it! Your patched ISO will be generated in the `output` folder.
+  5. Click **PATCH** and wait for it to finish. That's it! Your patched ISO will be generated in the `output` folder.
+
+### Language & Glyph Mapping
+
+The patcher automatically reads the **target language** from the translation database (`.db`) and applies the correct **glyph substitution** during the patching process.
+
+| Target Language | Behavior |
+|---|---|
+| **Spanish (es)** | Uses the hardcoded Spanish→Cyrillic map (`á→Г`, `é→Д`, `ñ→И`, etc.). The game's Japanese font displays Cyrillic glyphs, which are visually replaced by Spanish characters via PCSX2 texture injection. |
+| **English (en)** | No glyph mapping needed. English uses only ASCII characters present in the game's font. |
+| **Custom** | Loads a user-defined glyph map from the database (`settings.custom_glyph_map`). The webapp allows configuring this mapping for any language whose characters fit in Latin-1 (e.g. Polish `ą→Г, ć→Д, ę→Е, ł→Ж`). PCSX2 texture replacement must be configured accordingly. |
+
+The detected language and its active glyph mapping are displayed in the **Glyph Map** panel of the GUI before patching, so you can verify the correct language is being applied.
 
 ---
 
@@ -73,7 +85,19 @@ Si solo quieres aplicar la traducción, **no necesitas instalar Python ni usar l
    - Tu **ISO original** en japonés.
    - El archivo de la **base de datos de traducción (`.db`)**.
    - Los archivos `Data.bin` y `SLPS_256.11` (si se te solicitan o no están integrados).
-5. Dale a **PARCHEAR** y espera a que termine. ¡Y listo! Tendrás tu ISO parcheada en la carpeta `output`.
+  5. Dale a **PARCHEAR** y espera a que termine. ¡Y listo! Tendrás tu ISO parcheada en la carpeta `output`.
+
+### Idioma y Mapeo de Glifos
+
+El parcheador lee automáticamente el **idioma de traducción** desde la base de datos (`.db`) y aplica la **sustitución de glifos** correcta durante el proceso de parcheo.
+
+| Idioma de destino | Comportamiento |
+|---|---|
+| **Español (es)** | Usa el mapa fijo español→cirílico (`á→Г`, `é→Д`, `ñ→И`, etc.). La fuente japonesa del juego muestra glifos cirílicos, que son reemplazados visualmente por caracteres españoles mediante inyección de texturas en PCSX2. |
+| **Inglés (en)** | No necesita mapeo de glifos. El inglés usa solo caracteres ASCII presentes en la fuente del juego. |
+| **Personalizado (custom)** | Carga un mapa de glifos definido por el usuario desde la base de datos (`settings.custom_glyph_map`). La webapp permite configurar este mapeo para cualquier idioma cuyos caracteres quepan en Latin-1 (ej. polaco: `ą→Г, ć→Д, ę→Е, ł→Ж`). El reemplazo de texturas en PCSX2 debe configurarse de forma correspondiente. |
+
+El idioma detectado y su mapeo de glifos activo se muestran en el panel **Glyph Map** de la interfaz antes de parchear, para que puedas verificar que se está aplicando el idioma correcto.
 
 ---
 
