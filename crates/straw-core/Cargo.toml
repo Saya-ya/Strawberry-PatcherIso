@@ -1,0 +1,16 @@
+[package]
+name = "straw-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+csv.workspace = true
+encoding_rs.workspace = true
+png.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
