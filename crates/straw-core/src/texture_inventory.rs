@@ -241,6 +241,23 @@ pub fn patch_textures_from_manifest_with_glyph_map(
     out_dir: impl AsRef<Path>,
     glyph_map: Option<&GlyphMap>,
 ) -> Result<TexturePatchReport> {
+    patch_textures_from_manifest_with_options(data_bin, manifest_path, out_dir, glyph_map, 1)
+}
+
+/// Same as [`patch_textures_from_manifest_with_glyph_map`], but processes the
+/// per-file patch work across `workers` threads.
+///
+/// Each texture file is independent: it reads its own immutable slice of
+/// `Data.bin` and writes its own `ID_XXXXX.lz77` output, so the parallel loop
+/// needs no locking and keeps reports byte-for-byte identical to the sequential
+/// version. `workers <= 1` falls back to the sequential path.
+pub fn patch_textures_from_manifest_with_options(
+    data_bin: impl AsRef<Path>,
+    manifest_path: impl AsRef<Path>,
+    out_dir: impl AsRef<Path>,
+    glyph_map: Option<&GlyphMap>,
+    workers: usize,
+) -> Result<TexturePatchReport> {
     let data_bin = data_bin.as_ref();
     let manifest_path = manifest_path.as_ref();
     let out_dir = out_dir.as_ref();
@@ -268,36 +285,111 @@ pub fn patch_textures_from_manifest_with_glyph_map(
         fs::read(data_bin).with_context(|| format!("failed to read {}", data_bin.display()))?;
     let rows = texture_resource_rows(&data)?;
 
-    for (file_id, patches) in by_file {
-        report.files_processed += 1;
-        let Some(row) = find_row(&rows, file_id) else {
-            report.errors.push(format!("ID {file_id} not found"));
-            continue;
-        };
-        let start = row.offset as usize;
-        let end = start.saturating_add(row.size as usize).min(data.len());
-        if start >= end {
-            report
-                .errors
-                .push(format!("ID {file_id} has invalid resource range"));
-            continue;
+    // Each job is self-contained: read-only slice of `data` plus its own
+    // manifest entries. Results are keyed by file_id so the report stays
+    // deterministic regardless of completion order.
+    let jobs: Vec<(u32, Vec<TexturePatchEntry>)> = by_file.into_iter().collect();
+    report.files_processed = jobs.len();
+
+    let mut outcomes: BTreeMap<u32, TextureFileOutcome> = BTreeMap::new();
+    let chunk_size = jobs.len().div_ceil(workers.max(1)).max(1);
+    // Build owned chunks up front so each worker can move its chunk without
+    // aliasing the borrow checker, then reference the big buffers.
+    let chunks: Vec<Vec<(u32, Vec<TexturePatchEntry>)>> =
+        jobs.chunks(chunk_size).map(<[(u32, Vec<TexturePatchEntry>)]>::to_vec).collect();
+    thread::scope(|scope| {
+        let mut handles = Vec::new();
+        for chunk in chunks {
+            let data_ref = &data;
+            let rows_ref = &rows;
+            handles.push(scope.spawn(move || {
+                let mut local: Vec<(u32, TextureFileOutcome)> = Vec::new();
+                for (file_id, patches) in &chunk {
+                    local.push((
+                        *file_id,
+                        patch_one_texture_file(
+                            data_ref,
+                            rows_ref,
+                            out_dir,
+                            *file_id,
+                            patches,
+                            glyph_map,
+                        ),
+                    ));
+                }
+                local
+            }));
         }
-        let auto_metrics = (file_id == HEADER_TEXTURE_ID)
-            .then_some(glyph_map)
-            .flatten();
-        match process_texture_file(&data[start..end], &patches, auto_metrics) {
-            Ok((stream, applied, metric_changes)) => {
-                fs::write(out_dir.join(format!("ID_{file_id:05}.lz77")), stream)?;
+        for handle in handles {
+            match handle.join() {
+                Ok(partial) => outcomes.extend(partial),
+                Err(_) => {
+                    report.errors.push("texture worker thread panicked".to_owned());
+                }
+            }
+        }
+    });
+
+    for (_file_id, outcome) in outcomes {
+        match outcome {
+            TextureFileOutcome::Written {
+                applied,
+                metric_changes,
+            } => {
                 report.patches_applied += applied;
                 report.streams_written += 1;
                 report.glyph_metrics_adjusted += metric_changes.len();
                 report.glyph_metric_changes.extend(metric_changes);
             }
-            Err(err) => report.errors.push(format!("ID {file_id}: {err}")),
+            TextureFileOutcome::Failed(err) => report.errors.push(err),
         }
     }
 
     Ok(report)
+}
+
+enum TextureFileOutcome {
+    Written {
+        applied: usize,
+        metric_changes: Vec<GlyphMetricChange>,
+    },
+    Failed(String),
+}
+
+/// Patches and writes a single texture file. Reads only its own slice of
+/// `data` and writes one output file, so it is safe to call concurrently.
+fn patch_one_texture_file(
+    data: &[u8],
+    rows: &[FatEntry],
+    out_dir: &Path,
+    file_id: u32,
+    patches: &[TexturePatchEntry],
+    glyph_map: Option<&GlyphMap>,
+) -> TextureFileOutcome {
+    let Some(row) = find_row(rows, file_id) else {
+        return TextureFileOutcome::Failed(format!("ID {file_id} not found"));
+    };
+    let start = row.offset as usize;
+    let end = start.saturating_add(row.size as usize).min(data.len());
+    if start >= end {
+        return TextureFileOutcome::Failed(format!("ID {file_id} has invalid resource range"));
+    }
+    let auto_metrics = (file_id == HEADER_TEXTURE_ID)
+        .then_some(glyph_map)
+        .flatten();
+    match process_texture_file(&data[start..end], patches, auto_metrics) {
+        Ok((stream, applied, metric_changes)) => {
+            let out_path = out_dir.join(format!("ID_{file_id:05}.lz77"));
+            match fs::write(out_path, stream) {
+                Ok(()) => TextureFileOutcome::Written {
+                    applied,
+                    metric_changes,
+                },
+                Err(err) => TextureFileOutcome::Failed(format!("ID {file_id}: {err}")),
+            }
+        }
+        Err(err) => TextureFileOutcome::Failed(format!("ID {file_id}: {err}")),
+    }
 }
 
 pub fn inject_patched_texture_streams(
@@ -1521,6 +1613,7 @@ fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::spanish_glyph_map;
 
     fn font_metrics_blob() -> Vec<u8> {
         let image_width = 48_u16;
@@ -1551,6 +1644,97 @@ mod tests {
         let clut = 16 + 48 + image_size;
         tim2[clut + 4..clut + 8].copy_from_slice(&[255, 255, 255, 128]);
         blob
+    }
+
+    #[test]
+    fn parallel_texture_patching_matches_sequential_output() {
+        let temp = tempfile::tempdir().unwrap();
+        let offset = FAT_OFFSET + NUM_ENTRIES * ENTRY_SIZE + 256;
+        let original = indexed_font_fixture(offset);
+        let data_path = temp.path().join("Data.bin");
+        fs::write(&data_path, &original).unwrap();
+
+        // Build a PNG matching the ordinary resource's 2x2 TIM2 dimensions.
+        let png = temp.path().join("font.png");
+        let mut rgba = vec![0; 2 * 2 * 4];
+        for y in 0..2 {
+            for x in 0..2 {
+                rgba[(y * 2 + x) * 4..(y * 2 + x) * 4 + 4]
+                    .copy_from_slice(&[255, 255, 255, 255]);
+            }
+        }
+        write_png_rgba(&png, 2, 2, &rgba).unwrap();
+
+        // Patch the ordinary (non-header) resource so the test exercises the
+        // real per-file loop without the header's automatic glyph-metric path.
+        let rows = texture_resource_rows(&original).unwrap();
+        let file_id = rows
+            .iter()
+            .find(|row| row.id != HEADER_TEXTURE_ID)
+            .expect("fixture must contain an ordinary resource")
+            .id;
+        let manifest = temp.path().join("manifest.json");
+        fs::write(
+            &manifest,
+            serde_json::to_vec(&serde_json::json!([{
+                "file_id": file_id, "tim2_index": 0, "picture_index": 0,
+                "png": png, "mode": "preserve_palette", "lz77_offset": null
+            }]))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let seq_dir = temp.path().join("seq");
+        let par_dir = temp.path().join("par");
+        let glyph_map = spanish_glyph_map();
+
+        let seq = patch_textures_from_manifest_with_options(
+            &data_path,
+            &manifest,
+            &seq_dir,
+            Some(&glyph_map),
+            1,
+        )
+        .unwrap();
+        let par = patch_textures_from_manifest_with_options(
+            &data_path,
+            &manifest,
+            &par_dir,
+            Some(&glyph_map),
+            8,
+        )
+        .unwrap();
+
+        assert_eq!(seq.errors, par.errors);
+        assert_eq!(seq.files_processed, par.files_processed);
+        assert_eq!(seq.patches_applied, par.patches_applied);
+        assert_eq!(seq.streams_written, par.streams_written);
+        assert_eq!(seq.glyph_metrics_adjusted, par.glyph_metrics_adjusted);
+
+        let seq_files = read_dir_sorted(&seq_dir);
+        let par_files = read_dir_sorted(&par_dir);
+        assert_eq!(seq_files, par_files);
+        assert!(
+            seq.errors.is_empty(),
+            "fixture should patch cleanly, got errors: {:?}",
+            seq.errors
+        );
+        assert!(!seq_files.is_empty(), "fixture produced no streams");
+        for name in seq_files {
+            let a = fs::read(seq_dir.join(&name)).unwrap();
+            let b = fs::read(par_dir.join(&name)).unwrap();
+            assert_eq!(a, b, "stream {name} differs between sequential and parallel");
+        }
+    }
+
+    fn read_dir_sorted(dir: &std::path::Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
     }
 
     #[test]

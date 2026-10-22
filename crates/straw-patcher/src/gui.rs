@@ -13,6 +13,8 @@ pub struct PatcherGui {
     database: String,
     textures: String,
     output: String,
+    workers: usize,
+    auto_threads: bool,
     log: Vec<String>,
     running: bool,
     receiver: Receiver<GuiMessage>,
@@ -27,11 +29,17 @@ enum GuiMessage {
 impl Default for PatcherGui {
     fn default() -> Self {
         let (sender, receiver) = mpsc::channel();
+        let suggested = std::thread::available_parallelism()
+            .map(usize::from)
+            .unwrap_or(2)
+            .clamp(1, 8);
         Self {
             originals: "originales".into(),
             database: "translation_manager.db".into(),
             textures: "texturas".into(),
             output: "output/Strawberry_Patched.iso".into(),
+            workers: suggested,
+            auto_threads: true,
             log: vec!["Selecciona los archivos y pulsa PARCHEAR.".into()],
             running: false,
             receiver,
@@ -78,6 +86,21 @@ impl eframe::App for PatcherGui {
                 PickKind::Folder,
             );
             path_row(ui, "ISO de salida", &mut self.output, PickKind::Output);
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.checkbox(&mut self.auto_threads, "Ajuste automático de hilos");
+                if !self.auto_threads {
+                    ui.label("Hilos:");
+                    let mut workers = self.workers as f32;
+                    if ui
+                        .add(egui::Slider::new(&mut workers, 1.0..=32.0).text(""))
+                        .changed()
+                    {
+                        self.workers = workers.round() as usize;
+                    }
+                    ui.label(self.workers.to_string());
+                }
+            });
             ui.add_space(8.0);
             if ui
                 .add_enabled(!self.running, egui::Button::new("▶  PARCHEAR ISO"))
@@ -143,6 +166,7 @@ impl PatcherGui {
         let database = PathBuf::from(&self.database);
         let textures = PathBuf::from(&self.textures);
         let output = PathBuf::from(&self.output);
+        let workers = if self.auto_threads { 0 } else { self.workers };
         let sender = self.sender.clone();
         self.running = true;
         self.log.clear();
@@ -154,6 +178,7 @@ impl PatcherGui {
                 &database,
                 &textures,
                 &output,
+                workers,
                 &sender,
             );
             let _ = sender.send(GuiMessage::Finished(result));
@@ -167,6 +192,7 @@ fn run_child(
     database: &PathBuf,
     textures: &PathBuf,
     output: &PathBuf,
+    workers: usize,
     sender: &Sender<GuiMessage>,
 ) -> Result<(), String> {
     let mut child = Command::new(exe)
@@ -178,6 +204,8 @@ fn run_child(
         .arg(textures)
         .arg("--output")
         .arg(output)
+        .arg("--workers")
+        .arg(workers.to_string())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

@@ -3,6 +3,7 @@ use std::{
     fs,
     io::{Seek, SeekFrom, Write},
     path::Path,
+    thread,
 };
 
 use anyhow::{bail, Context, Result};
@@ -30,6 +31,24 @@ pub fn patch_translated_scripts(
     csv_path: impl AsRef<Path>,
     glyph_map: Option<&GlyphMap>,
 ) -> Result<PatchScriptsReport> {
+    patch_translated_scripts_with_options(data_bin_path, dec_dir, csv_path, glyph_map, 1)
+}
+
+/// Same as [`patch_translated_scripts`], but spreads the CPU-heavy
+/// decompress/rebuild/compress work across `workers` threads.
+///
+/// Scripts are independent units of work, so each worker rebuilds and compresses
+/// a script without touching `Data.bin`. The compressed results are then applied
+/// to the shared buffer sequentially, which keeps output byte-for-byte identical
+/// to the sequential implementation and avoids any aliasing between slots.
+/// `workers <= 1` falls back to the sequential path.
+pub fn patch_translated_scripts_with_options(
+    data_bin_path: impl AsRef<Path>,
+    dec_dir: impl AsRef<Path>,
+    csv_path: impl AsRef<Path>,
+    glyph_map: Option<&GlyphMap>,
+    workers: usize,
+) -> Result<PatchScriptsReport> {
     let data_bin_path = data_bin_path.as_ref();
     let dec_dir = dec_dir.as_ref();
     let csv_path = csv_path.as_ref();
@@ -46,12 +65,50 @@ pub fn patch_translated_scripts(
         errors: Vec::new(),
     };
 
-    for (script_id, rows) in rows_by_script {
-        match patch_one_script(&mut data, &fat_rows, dec_dir, script_id, &rows, glyph_map) {
-            Ok(rows_applied) => {
-                report.scripts_patched += 1;
-                report.rows_applied += rows_applied;
+    // Phase 1 (parallel): rebuild + compress each script independently. Workers
+    // only read their own `.dec` file; nothing touches `data` yet.
+    let jobs: Vec<(i32, Vec<TranslationRow>)> = rows_by_script.into_iter().collect();
+    let mut rebuilt: BTreeMap<i32, Result<PatchedScript>> = BTreeMap::new();
+    let chunk_size = jobs.len().div_ceil(workers.max(1)).max(1);
+    // Owned chunks let each worker `move` its slice without aliasing `data`.
+    let chunks: Vec<Vec<(i32, Vec<TranslationRow>)>> =
+        jobs.chunks(chunk_size).map(<[(i32, Vec<TranslationRow>)]>::to_vec).collect();
+    thread::scope(|scope| {
+        let mut handles = Vec::new();
+        for chunk in chunks {
+            handles.push(scope.spawn(move || {
+                let mut local: Vec<(i32, Result<PatchedScript>)> = Vec::new();
+                for (script_id, rows) in &chunk {
+                    let result = rebuild_script(dec_dir, *script_id, rows, glyph_map);
+                    local.push((*script_id, result));
+                }
+                local
+            }));
+        }
+        for handle in handles {
+            match handle.join() {
+                Ok(partial) => {
+                    for (script_id, result) in partial {
+                        rebuilt.insert(script_id, result);
+                    }
+                }
+                Err(_) => {
+                    report.errors.push("script worker thread panicked".to_owned());
+                }
             }
+        }
+    });
+
+    // Phase 2 (sequential): write compressed streams into the shared buffer.
+    for (script_id, result) in rebuilt {
+        match result {
+            Ok(patched) => match apply_patched_script(&mut data, &fat_rows, script_id, patched) {
+                Ok(rows_applied) => {
+                    report.scripts_patched += 1;
+                    report.rows_applied += rows_applied;
+                }
+                Err(err) => report.errors.push(format!("ID {script_id}: {err}")),
+            },
             Err(err) => report.errors.push(format!("ID {script_id}: {err}")),
         }
     }
@@ -68,14 +125,20 @@ pub fn patch_translated_scripts(
     Ok(report)
 }
 
-fn patch_one_script(
-    data: &mut [u8],
-    fat_rows: &[crate::datafat::FatEntry],
+/// A compressed script ready to be written into `Data.bin`.
+struct PatchedScript {
+    compressed: Vec<u8>,
+    rows_applied: usize,
+}
+
+/// Rebuilds and compresses one script. Pure function of its `.dec` file and
+/// translation rows, so it is safe to run on worker threads.
+fn rebuild_script(
     dec_dir: &Path,
     script_id: i32,
     rows: &[TranslationRow],
     glyph_map: Option<&GlyphMap>,
-) -> Result<usize> {
+) -> Result<PatchedScript> {
     if script_id < 0 {
         bail!("ELF rows are not script rows");
     }
@@ -99,13 +162,28 @@ fn patch_one_script(
         bail!("compressed roundtrip mismatch");
     }
 
+    Ok(PatchedScript {
+        compressed,
+        rows_applied: rebuild_report.rows_applied,
+    })
+}
+
+/// Writes a pre-compressed script into the shared buffer and updates its size
+/// field. Runs sequentially so slot writes never race each other.
+fn apply_patched_script(
+    data: &mut [u8],
+    fat_rows: &[crate::datafat::FatEntry],
+    script_id: i32,
+    patched: PatchedScript,
+) -> Result<usize> {
+    let file_id = script_id as u32;
     let target = find_row(fat_rows, file_id).with_context(|| "file ID not found in FAT")?;
     let capacity =
         slot_capacity(fat_rows, target).with_context(|| "could not compute slot capacity")?;
-    if compressed.len() > capacity as usize {
+    if patched.compressed.len() > capacity as usize {
         bail!(
             "compressed stream does not fit ({} > {})",
-            compressed.len(),
+            patched.compressed.len(),
             capacity
         );
     }
@@ -115,13 +193,14 @@ fn patch_one_script(
     if end > data.len() {
         bail!("target slot outside Data.bin");
     }
-    data[start..start + compressed.len()].copy_from_slice(&compressed);
-    data[start + compressed.len()..end].fill(0);
+    data[start..start + patched.compressed.len()].copy_from_slice(&patched.compressed);
+    data[start + patched.compressed.len()..end].fill(0);
 
     let size_offset = size_field_write_offset(target);
-    data[size_offset..size_offset + 4].copy_from_slice(&(compressed.len() as u32).to_le_bytes());
+    data[size_offset..size_offset + 4]
+        .copy_from_slice(&(patched.compressed.len() as u32).to_le_bytes());
 
-    Ok(rebuild_report.rows_applied)
+    Ok(patched.rows_applied)
 }
 
 fn load_translation_rows(csv_path: &Path) -> Result<BTreeMap<i32, Vec<TranslationRow>>> {

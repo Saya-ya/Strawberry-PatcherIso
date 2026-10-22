@@ -35,7 +35,9 @@ pub use iso::{
 };
 pub use lz77::{compress_lz77, decompress_lz77};
 pub use patch_elf::{patch_translated_elf, PatchElfReport};
-pub use patch_scripts::{patch_translated_scripts, PatchScriptsReport};
+pub use patch_scripts::{
+    patch_translated_scripts, patch_translated_scripts_with_options, PatchScriptsReport,
+};
 pub use script_rebuilder::{
     find_segment_containing, rebuild_local_slack, rebuild_shift_suffix, RebuildReport,
     SegmentReport, TextSegment, TranslationRow,
@@ -47,7 +49,7 @@ pub use text_layout::{
 pub use texture_inventory::{
     clean_all_pngs_in_dir, clean_png_transparency, inject_patched_texture_streams,
     normalize_transparent_pixels, patch_textures_from_manifest,
-    patch_textures_from_manifest_with_glyph_map, write_texture_inventory,
-    write_texture_inventory_with_progress, GlyphMetricChange, TextureInjectReport,
-    TexturePatchReport, TextureRecord,
+    patch_textures_from_manifest_with_glyph_map, patch_textures_from_manifest_with_options,
+    write_texture_inventory, write_texture_inventory_with_progress, GlyphMetricChange,
+    TextureInjectReport, TexturePatchReport, TextureRecord,
 };

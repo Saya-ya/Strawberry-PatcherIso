@@ -54,6 +54,19 @@ cargo run --release -p straw-patcher
 
 The GUI lets you choose `originales/`, the `.db`, `texturas/` and the output ISO. The texture step is skipped when `texturas/manifest.json` is absent. To build the Windows x64 executable, run `./build_windows.ps1` on Windows with the Rust MSVC toolchain installed; it writes `dist/StrawPatcher.exe`. The executable and patching pipeline are Rust and do not require Python.
 
+#### Hilos y carpeta de trabajo
+
+El parcheo usa varios núcleos por defecto. En la interfaz gráfica puedes activar **"Ajuste automático de hilos"** (usa los núcleos disponibles, hasta 8) o fijar un número manualmente.
+
+Desde la consola:
+
+- `--workers N` — número de hilos (`0` = detección automática, por defecto). Los scripts y las texturas se parchean en paralelo; el resultado es **idéntico byte a byte** al parcheo secuencial.
+- `--work-dir RUTA` — dónde crear los archivos intermedios (`Data_patched.bin` ocupa unos 2 GB). Por defecto se usa la carpeta de la ISO de salida, no la carpeta temporal del sistema, que suele estar en memoria y puede ser demasiado pequeña.
+
+```bash
+cargo run --release -p straw-patcher -- --cli --workers 4 --work-dir D:/straw_work
+```
+
 ---
 ---
 
@@ -101,3 +114,16 @@ cargo run --release -p straw-patcher
 ```
 
 La interfaz permite elegir `originales/`, la `.db`, `texturas/` y la ISO de salida. Si no existe `texturas/manifest.json`, se omite esa etapa. Para compilar el ejecutable Windows x64, ejecuta `./build_windows.ps1` en Windows con Rust MSVC instalado; genera `dist/StrawPatcher.exe`. El ejecutable y el proceso de parcheo están hechos en Rust y no requieren Python.
+
+#### Hilos y carpeta de trabajo
+
+El parcheo usa varios núcleos por defecto. En la interfaz gráfica puedes activar **"Ajuste automático de hilos"** (usa los núcleos disponibles, hasta 8) o fijar un número manualmente.
+
+Desde la consola:
+
+- `--workers N` — número de hilos (`0` = detección automática, por defecto). Los scripts y las texturas se parchean en paralelo; el resultado es **idéntico byte a byte** al parcheo secuencial.
+- `--work-dir RUTA` — dónde crear los archivos intermedios (`Data_patched.bin` ocupa unos 2 GB). Por defecto se usa la carpeta de la ISO de salida, no la carpeta temporal del sistema, que suele estar en memoria y puede ser demasiado pequeña.
+
+```bash
+cargo run --release -p straw-patcher -- --cli --workers 4 --work-dir D:/straw_work
+```
