@@ -65,15 +65,30 @@ Si borras, renuevas o mueves un PNG de `uploads/`, el parcheo fallará.
 > **Necesitas `manifest.json` Y `uploads/`.** El `.json` solo dice *qué*
 > cambiar; los PNG son los cambios en sí.
 
+> También vale con los PNG **sueltos en la misma carpeta** que el
+> `manifest.json`, sin la subcarpeta `uploads/`. Pero si usas una subcarpeta,
+> tiene que llamarse **`uploads`** (con otro nombre el parcheo falla).
+
 ---
 
 ## 3. Cómo parchear
 
 1. Abre la carpeta `StrawPatcher/`.
 2. Haz doble clic en **`StrawPatcher.exe`**.
-3. Deja los campos como están: ya apuntan a `originales/`,
-   `translation_manager.db`, `texturas/` y `output/Strawberry_Patched.iso`.
-   Si moviste algo, corrige la ruta en el campo correspondiente.
+3. Revisa los 4 campos. Deberían apuntar a:
+
+   | Campo | Qué hay que señalar |
+   |---|---|
+   | **Carpeta originales** | La carpeta `originales/` |
+   | **Base de traducción (.db)** | El archivo `translation_manager.db` |
+   | **Carpeta de texturas** | La carpeta `texturas/` (la que contiene `manifest.json`) |
+   | **ISO de salida** | `output/Strawberry_Patched.iso` |
+
+   En **"Carpeta de texturas"** señalas **la carpeta**, no el archivo
+   `manifest.json` por separado: el programa busca los PNG dentro de esa
+   carpeta por su cuenta.
+
+   Si dejaste todo como viene, no tienes que tocar nada.
 4. Pulsa el botón verde **▶ PARCHEAR ISO**.
 5. Espera. Tarda entre **1 y 2 minutos** y el log va mostrando el progreso.
 6. Cuando aparezca *"Parcheo terminado correctamente"*, tu ISO está en:
