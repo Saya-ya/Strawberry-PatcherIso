@@ -15,16 +15,31 @@ This is an open-source, standalone patcher for the PS2 game *"Strawberry Panic!"
 
 ### For the End User (No Technical Knowledge Required)
 
+> 👉 **See [LEEME-para-usuarios.md](LEEME-para-usuarios.md)** for the folder layout and step-by-step instructions to ship with the `.exe`.
+
 If you just want to apply the translation, you don't need to install development tools or use the command line.
 
-1. Download the `.zip` file from the **Releases** section on this GitHub page.
-2. Extract the file.
+1. Download `StrawPatcher.exe` from the **Releases** section on this GitHub page.
+2. Download and extract the translation archive (`StrawBerry-Spanish.rar`) in the same folder.
 3. Double-click the `StrawPatcher.exe` file.
-4. In the window that opens, select:
-   - Your **Original Japanese ISO**.
-   - The **Translation Database file (`.db`)**.
-   - The `Data.bin` and `SLPS_256.11` files (if prompted or not bundled).
-  5. Click **PATCH** and wait for it to finish. That's it! Your patched ISO will be generated in the `output` folder.
+4. Arrange the files next to the executable like this:
+
+```
+StrawPatcher/
+├── StrawberryPatcher.exe
+├── translation_manager.db     ← the translation database
+├── originales/                ← your original Japanese ISO + Data.bin + SLPS_256.11
+│   ├── Strawberry_patched.iso
+│   ├── Data.bin
+│   └── SLPS_256.11
+└── Texturas/                  ← the texture pack
+    ├── manifest.json
+    └── uploads/               ← the edited PNGs
+```
+
+5. Click **PATCH** and wait for it to finish. That's it! Your patched ISO will be generated in the `output` folder.
+
+> You need your own copy of the original Japanese game. The download does not include it.
 
 ### Language & Glyph Mapping
 
@@ -52,16 +67,18 @@ The Rust command-line patcher uses the current `StrawTraduccion` core: it reads 
 cargo run --release -p straw-patcher
 ```
 
-The GUI lets you choose `originales/`, the `.db`, `texturas/` and the output ISO. The texture step is skipped when `texturas/manifest.json` is absent. To build the Windows x64 executable, run `./build_windows.ps1` on Windows with the Rust MSVC toolchain installed; it writes `dist/StrawPatcher.exe`. The executable and patching pipeline are Rust and do not require Python.
+The GUI lets you choose `originales/`, the `.db`, the texture folder and the output ISO. The texture step is skipped when that folder has no `manifest.json`. The folder name is free: the PNGs can sit in `uploads/` next to the manifest or loose in the same folder.
 
-#### Hilos y carpeta de trabajo
+To build the Windows x64 executable, run `./build_windows.ps1` on Windows with the Rust MSVC toolchain installed; it writes `dist/StrawPatcher.exe`. The executable and patching pipeline are Rust and do not require Python. The `x86_64-pc-windows-gnu` target also produces a standalone `.exe` with no extra DLLs, so it can be cross-compiled from Linux.
 
-El parcheo usa varios núcleos por defecto. En la interfaz gráfica puedes activar **"Ajuste automático de hilos"** (usa los núcleos disponibles, hasta 8) o fijar un número manualmente.
+#### Threads and work folder
 
-Desde la consola:
+Patching uses several cores by default. In the GUI you can enable **"Ajuste automático de hilos"** (uses the available cores, up to 8) or set a number manually.
 
-- `--workers N` — número de hilos (`0` = detección automática, por defecto). Los scripts y las texturas se parchean en paralelo; el resultado es **idéntico byte a byte** al parcheo secuencial.
-- `--work-dir RUTA` — dónde crear los archivos intermedios (`Data_patched.bin` ocupa unos 2 GB). Por defecto se usa la carpeta de la ISO de salida, no la carpeta temporal del sistema, que suele estar en memoria y puede ser demasiado pequeña.
+From the command line:
+
+- `--workers N` — number of threads (`0` = automatic detection, the default). Scripts and textures are patched in parallel; the result is **byte-for-byte identical** to the sequential run.
+- `--work-dir PATH` — where the intermediate files are created (`Data_patched.bin` takes about 2 GB). It defaults to the output ISO's folder rather than the system temp folder, which is often in memory and can be too small.
 
 ```bash
 cargo run --release -p straw-patcher -- --cli --workers 4 --work-dir D:/straw_work
@@ -76,16 +93,31 @@ Este es un parcheador "standalone" de código abierto para el juego de PS2 *"Str
 
 ### Para el Usuario Final (No requiere conocimientos técnicos)
 
+> 👉 **Mira [LEEME-para-usuarios.md](LEEME-para-usuarios.md)** para la estructura de carpetas y las instrucciones paso a paso que acompañan al `.exe`.
+
 Si solo quieres aplicar la traducción, no necesitas instalar herramientas de desarrollo ni usar la línea de comandos.
 
-1. Descarga el archivo `.zip` desde la sección de **Releases** en este GitHub.
-2. Descomprime el archivo.
+1. Descarga `StrawPatcher.exe` desde la sección de **Releases** en este GitHub.
+2. Descarga y descomprime el archivo de traducción (`StrawBerry-Spanish.rar`) en la misma carpeta.
 3. Haz doble clic en el archivo `StrawPatcher.exe`.
-4. En la ventana que se abre, selecciona:
-   - Tu **ISO original** en japonés.
-   - El archivo de la **base de datos de traducción (`.db`)**.
-   - Los archivos `Data.bin` y `SLPS_256.11` (si se te solicitan o no están integrados).
-  5. Dale a **PARCHEAR** y espera a que termine. ¡Y listo! Tendrás tu ISO parcheada en la carpeta `output`.
+4. Coloca los archivos junto al ejecutable así:
+
+```
+StrawPatcher/
+├── StrawberryPatcher.exe
+├── translation_manager.db     ← la base de datos de traducción
+├── originales/                ← tu ISO original japonesa + Data.bin + SLPS_256.11
+│   ├── Strawberry_patched.iso
+│   ├── Data.bin
+│   └── SLPS_256.11
+└── Texturas/                  ← el paquete de texturas
+    ├── manifest.json
+    └── uploads/               ← los PNG editados
+```
+
+5. Dale a **PARCHEAR** y espera a que termine. ¡Y listo! Tendrás tu ISO parcheada en la carpeta `output`.
+
+> Necesitas tu propia copia del juego original en japonés. La descarga no lo incluye.
 
 ### Idioma y Mapeo de Glifos
 
@@ -113,7 +145,9 @@ El parcheador Rust reutiliza el núcleo actual de `StrawTraduccion`: lee traducc
 cargo run --release -p straw-patcher
 ```
 
-La interfaz permite elegir `originales/`, la `.db`, `texturas/` y la ISO de salida. Si no existe `texturas/manifest.json`, se omite esa etapa. Para compilar el ejecutable Windows x64, ejecuta `./build_windows.ps1` en Windows con Rust MSVC instalado; genera `dist/StrawPatcher.exe`. El ejecutable y el proceso de parcheo están hechos en Rust y no requieren Python.
+La interfaz permite elegir `originales/`, la `.db`, la carpeta de texturas y la ISO de salida. Si esa carpeta no tiene `manifest.json`, se omite esa etapa. El nombre de la carpeta es libre: los PNG pueden estar en `uploads/` junto al manifest o sueltos en la misma carpeta.
+
+Para compilar el ejecutable Windows x64, ejecuta `./build_windows.ps1` en Windows con Rust MSVC instalado; genera `dist/StrawPatcher.exe`. El ejecutable y el proceso de parcheo están hechos en Rust y no requieren Python. El target `x86_64-pc-windows-gnu` también genera un `.exe` autónomo sin DLLs adicionales, así que se puede compilar desde Linux.
 
 #### Hilos y carpeta de trabajo
 
