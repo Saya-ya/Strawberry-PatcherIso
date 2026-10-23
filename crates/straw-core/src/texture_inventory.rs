@@ -2,7 +2,7 @@ use std::{
     borrow::Cow,
     collections::{BTreeMap, BTreeSet},
     fs,
-    path::Path,
+    path::{Path, PathBuf},
     sync::mpsc,
     thread,
     time::Instant,
@@ -263,8 +263,12 @@ pub fn patch_textures_from_manifest_with_options(
     let out_dir = out_dir.as_ref();
     let manifest = fs::read_to_string(manifest_path)
         .with_context(|| format!("failed to read {}", manifest_path.display()))?;
-    let entries: Vec<TexturePatchEntry> = serde_json::from_str(&manifest)
+    let mut entries: Vec<TexturePatchEntry> = serde_json::from_str(&manifest)
         .with_context(|| format!("failed to parse {}", manifest_path.display()))?;
+    // Manifests are shared between machines, so PNG paths cannot be trusted to
+    // be absolute or already rooted at the texture folder. Resolve each one
+    // against the known bases instead of trusting the stored string.
+    resolve_texture_png_paths(&mut entries, manifest_path);
     fs::create_dir_all(out_dir)
         .with_context(|| format!("failed to create {}", out_dir.display()))?;
 
@@ -354,6 +358,58 @@ enum TextureFileOutcome {
         metric_changes: Vec<GlyphMetricChange>,
     },
     Failed(String),
+}
+
+/// Rewrites each entry's `png` path so it works on the current machine.
+///
+/// A manifest produced by StrawTraduccion stores paths like
+/// `texturas/uploads/ID_...png`, relative to that project's root. Someone
+/// unpacking the patch on their own machine may keep a different folder name
+/// or run the patcher from a different working directory, so a single base is
+/// not enough. For every entry we keep the stored string when it already
+/// resolves, then try the manifest's own folder, its `uploads/` child, the
+/// first path segment inside the manifest folder, and finally the filename
+/// alone. The first candidate that exists wins, so the original layout keeps
+/// working unchanged.
+fn resolve_texture_png_paths(entries: &mut [TexturePatchEntry], manifest_path: &Path) {
+    let manifest_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
+    for entry in entries {
+        if entry.png.is_empty() {
+            continue;
+        }
+        let stored = PathBuf::from(&entry.png);
+        if stored.is_absolute() && stored.is_file() {
+            continue;
+        }
+        let Some(file_name) = stored.file_name().map(PathBuf::from) else {
+            continue;
+        };
+        // Drop the first component ("texturas") when the manifest lives in it,
+        // so `texturas/uploads/x.png` also matches `<manifest>/uploads/x.png`.
+        let stripped: Option<PathBuf> = {
+            let mut components = stored.components();
+            let first = components.next();
+            match first {
+                Some(std::path::Component::Normal(_)) => {
+                    let rest: PathBuf = components.collect();
+                    (!rest.as_os_str().is_empty()).then_some(rest)
+                }
+                _ => None,
+            }
+        };
+
+        let mut candidates = Vec::new();
+        candidates.push(manifest_dir.join(&stored));
+        candidates.push(manifest_dir.join(&file_name));
+        if let Some(rest) = stripped.as_ref() {
+            candidates.push(manifest_dir.join(rest));
+        }
+        candidates.push(manifest_dir.join("uploads").join(&file_name));
+
+        if let Some(found) = candidates.into_iter().find(|path| path.is_file()) {
+            entry.png = found.to_string_lossy().replace('\\', "/");
+        }
+    }
 }
 
 /// Patches and writes a single texture file. Reads only its own slice of
@@ -1738,6 +1794,70 @@ mod tests {
     }
 
     #[test]
+    fn resolves_manifest_png_paths_from_foreign_layouts() {
+        let temp = tempfile::tempdir().unwrap();
+        let textures = temp.path().join("texturas");
+        let uploads = textures.join("uploads");
+        fs::create_dir_all(&uploads).unwrap();
+        let png = uploads.join("ID_00007_T005_P00_224x48.png");
+        fs::write(&png, b"png").unwrap();
+        let manifest_path = textures.join("manifest.json");
+
+        let mut make = |stored: &str| {
+            vec![TexturePatchEntry {
+                file_id: 7,
+                tim2_index: 5,
+                picture_index: 0,
+                png: stored.to_owned(),
+                mode: Some("preserve_palette".to_owned()),
+                lz77_offset: None,
+            }]
+        };
+
+        // The layout StrawTraduccion actually writes: rooted at the project.
+        let mut entries = make("texturas/uploads/ID_00007_T005_P00_224x48.png");
+        resolve_texture_png_paths(&mut entries, &manifest_path);
+        assert_eq!(entries[0].png, png.to_string_lossy().replace('\\', "/"));
+
+        // Manifest already sitting next to its uploads folder.
+        let mut entries = make("uploads/ID_00007_T005_P00_224x48.png");
+        resolve_texture_png_paths(&mut entries, &manifest_path);
+        assert_eq!(entries[0].png, png.to_string_lossy().replace('\\', "/"));
+
+        // Bare filename.
+        let mut entries = make("ID_00007_T005_P00_224x48.png");
+        resolve_texture_png_paths(&mut entries, &manifest_path);
+        assert_eq!(entries[0].png, png.to_string_lossy().replace('\\', "/"));
+
+        // A missing PNG keeps its stored path so the error message stays useful.
+        let mut entries = make("uploads/no_existe.png");
+        resolve_texture_png_paths(&mut entries, &manifest_path);
+        assert_eq!(entries[0].png, "uploads/no_existe.png");
+    }
+
+    #[test]
+    fn unresolved_png_path_stays_as_stored_so_the_patcher_reports_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let textures = temp.path().join("texturas");
+        // uploads exists but is empty, so no candidate can resolve.
+        fs::create_dir_all(textures.join("uploads")).unwrap();
+        let manifest_path = textures.join("manifest.json");
+        let mut entries = vec![TexturePatchEntry {
+            file_id: 7,
+            tim2_index: 5,
+            picture_index: 0,
+            png: "texturas/uploads/ID_00007_T005_P00_224x48.png".to_owned(),
+            mode: Some("preserve_palette".to_owned()),
+            lz77_offset: None,
+        }];
+        resolve_texture_png_paths(&mut entries, &manifest_path);
+        assert_eq!(
+            entries[0].png, "texturas/uploads/ID_00007_T005_P00_224x48.png",
+            "an unresolvable PNG must keep its stored path and surface as an error"
+        );
+    }
+
+    #[test]
     fn auto_metrics_use_active_map_alpha_and_deduplicate_aliases() {
         let temp = tempfile::tempdir().unwrap();
         let png = temp.path().join("font.png");
@@ -2004,3 +2124,6 @@ mod tests {
         assert_eq!(closest_index(&color, &palette), 2);
     }
 }
+
+
+

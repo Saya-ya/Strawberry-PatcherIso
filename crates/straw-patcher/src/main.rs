@@ -60,6 +60,7 @@ fn main() -> Result<()> {
 }
 
 async fn run_cli(args: Args) -> Result<()> {
+    let args = resolve_args_against_exe(args);
     let iso = find_file(&args.originales, &[".iso"])?;
     let data_bin = args.originales.join("Data.bin");
     let elf = args.originales.join("SLPS_256.11");
@@ -160,7 +161,14 @@ async fn run_cli(args: Args) -> Result<()> {
     );
 
     let manifest = args.texturas.join("manifest.json");
-    if manifest.is_file() {
+    if !manifest.is_file() {
+        // Textures are optional, but say it loudly: a text-only ISO can look
+        // wrong (wrong font glyphs) without any obvious cause.
+        println!(
+            "AVISO: no existe {}; se omiten las texturas. La ISO saldra solo con textos y ELF.",
+            manifest.display()
+        );
+    } else {
         let texture_out = staging.path().join("textures");
         let started = Instant::now();
         let texture_report = patch_textures_from_manifest_with_options(
@@ -171,7 +179,12 @@ async fn run_cli(args: Args) -> Result<()> {
             workers,
         )?;
         if !texture_report.errors.is_empty() {
-            bail!("Fallaron texturas: {}", texture_report.errors.join("; "));
+            bail!(
+                "Fallaron {} texturas. Revisa que '{}' contenga manifest.json y la subcarpeta 'uploads' con los PNG: {}",
+                texture_report.errors.len(),
+                args.texturas.display(),
+                texture_report.errors.join("; ")
+            );
         }
         let patched_elapsed = started.elapsed().as_secs_f32();
         let started = Instant::now();
@@ -189,8 +202,6 @@ async fn run_cli(args: Args) -> Result<()> {
             patched_elapsed,
             started.elapsed().as_secs_f32()
         );
-    } else {
-        println!("No existe {}; se omiten texturas", manifest.display());
     }
 
     if args.output.exists() && same_file(&iso, &args.output) {
@@ -223,6 +234,59 @@ fn resolve_workers(requested: usize) -> usize {
     }
 }
 
+/// Anchors relative input paths to the folder containing the executable.
+///
+/// Explorer does not set the working directory to the executable's folder when
+/// a program is launched by double-click, so a bare `originales/` would resolve
+/// against an unpredictable location and the default layout would break. Any
+/// path that already exists as given, and any absolute path, is left untouched
+/// so explicit overrides keep working.
+fn resolve_args_against_exe(mut args: Args) -> Args {
+    let Some(exe_dir) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+    else {
+        return args;
+    };
+    for path in [
+        &mut args.originales,
+        &mut args.db,
+        &mut args.texturas,
+    ] {
+        anchor_relative_to(path, &exe_dir, false);
+    }
+    anchor_relative_to(&mut args.output, &exe_dir, true);
+    if let Some(work_dir) = args.work_dir.as_mut() {
+        anchor_relative_to(work_dir, &exe_dir, true);
+    }
+    args
+}
+
+/// Points a relative `path` at `base_dir` when the files are there.
+///
+/// Windows does not set the working directory to the executable's folder when
+/// a program is launched by double-click, so a bare `originales/` would resolve
+/// against an unpredictable location. Anything that already exists as given is
+/// left alone, so explicit overrides keep priority.
+fn anchor_relative_to(path: &mut PathBuf, base_dir: &Path, allow_missing: bool) {
+    if path.is_absolute() || path.exists() {
+        return;
+    }
+    let candidate = base_dir.join(&*path);
+    let exists_under_base = candidate.exists();
+    // For a path that does not exist yet (the output ISO inside a not-yet
+    // created `output/` folder) it is enough that it stays inside base_dir.
+    let stays_in_base = candidate
+        .strip_prefix(base_dir)
+        .ok()
+        .map(|rest| !rest.as_os_str().is_empty())
+        .unwrap_or(false);
+    let parent_ready = candidate.parent().is_some_and(Path::exists);
+    if exists_under_base || (allow_missing && (parent_ready || stays_in_base)) {
+        *path = candidate;
+    }
+}
+
 fn find_file(dir: &Path, suffixes: &[&str]) -> Result<PathBuf> {
     let mut candidates = std::fs::read_dir(dir)
         .with_context(|| format!("No se pudo leer {}", dir.display()))?
@@ -245,4 +309,58 @@ fn find_file(dir: &Path, suffixes: &[&str]) -> Result<PathBuf> {
 
 fn same_file(left: &Path, right: &Path) -> bool {
     std::fs::canonicalize(left).ok() == std::fs::canonicalize(right).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn anchors_relative_paths_to_the_executable_folder() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path();
+        std::fs::create_dir_all(base.join("originales")).unwrap();
+        std::fs::create_dir_all(base.join("texturas").join("uploads")).unwrap();
+        std::fs::write(base.join("translation_manager.db"), b"db").unwrap();
+
+        let mut db = PathBuf::from("translation_manager.db");
+        anchor_relative_to(&mut db, base, false);
+        assert_eq!(db, base.join("translation_manager.db"));
+
+        let mut originales = PathBuf::from("originales");
+        anchor_relative_to(&mut originales, base, false);
+        assert_eq!(originales, base.join("originales"));
+
+        let mut texturas = PathBuf::from("texturas");
+        anchor_relative_to(&mut texturas, base, false);
+        assert_eq!(texturas, base.join("texturas"));
+    }
+
+    #[test]
+    fn keeps_absolute_and_existing_relative_paths_untouched() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path();
+        let absolute = PathBuf::from("/tmp/ya/existe.iso");
+        let mut path = absolute.clone();
+        anchor_relative_to(&mut path, base, true);
+        assert_eq!(path, absolute);
+
+        let mut cwd_relative = PathBuf::from("originales");
+        std::fs::create_dir("originales").unwrap();
+        anchor_relative_to(&mut cwd_relative, base, false);
+        assert_eq!(cwd_relative, PathBuf::from("originales"));
+        std::fs::remove_dir("originales").unwrap();
+    }
+
+    #[test]
+    fn anchors_output_that_does_not_exist_yet() {
+        let temp = tempfile::tempdir().unwrap();
+        let base = temp.path();
+        let mut output = PathBuf::from("output/Strawberry_Patched.iso");
+        anchor_relative_to(&mut output, base, true);
+        assert_eq!(
+            output,
+            base.join("output").join("Strawberry_Patched.iso")
+        );
+    }
 }
