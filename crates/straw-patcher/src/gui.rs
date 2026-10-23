@@ -8,6 +8,8 @@ use std::{
 
 use eframe::egui;
 
+use crate::branding;
+
 pub struct PatcherGui {
     originals: String,
     database: String,
@@ -64,8 +66,20 @@ impl eframe::App for PatcherGui {
         }
 
         egui::CentralPanel::default().show(ctx, |ui| {
-            ui.heading("StrawPatcher · Strawberry Panic! (PS2)");
-            ui.label("Parcheador Rust — los originales no se modifican.");
+            ui.horizontal(|ui| {
+                ui.add(
+                    egui::Image::new(&ctx.load_texture(
+                        "innov-logo",
+                        branding::logo_image(),
+                        egui::TextureOptions::LINEAR,
+                    ))
+                    .max_size(egui::vec2(48.0, 48.0)),
+                );
+                ui.vertical(|ui| {
+                    ui.heading("StrawPatcher · Strawberry Panic! (PS2)");
+                    ui.label("Parcheador Rust — los originales no se modifican.");
+                });
+            });
             ui.add_space(12.0);
             path_row(
                 ui,
@@ -235,5 +249,46 @@ fn run_child(
 fn forward_lines(reader: impl std::io::Read, sender: Sender<GuiMessage>) {
     for line in BufReader::new(reader).lines().map_while(Result::ok) {
         let _ = sender.send(GuiMessage::Log(line));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Renders the header once to confirm the logo can be drawn.
+    #[test]
+    fn header_renders_the_logo() {
+        let ctx = egui::Context::default();
+        let mut drew = false;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    let texture = ctx.load_texture(
+                        "innov-logo",
+                        branding::logo_image(),
+                        egui::TextureOptions::LINEAR,
+                    );
+                    let response = ui.add(
+                        egui::Image::new(&texture).max_size(egui::vec2(48.0, 48.0)),
+                    );
+                    drew = response.rect.height() > 0.0;
+                    ui.vertical(|ui| {
+                        ui.heading("StrawPatcher · Strawberry Panic! (PS2)");
+                    });
+                });
+            });
+        });
+        assert!(drew, "the logo was not drawn");
+    }
+
+    #[test]
+    fn defaults_point_to_the_documented_layout() {
+        let gui = PatcherGui::default();
+        assert_eq!(gui.originals, "originales");
+        assert_eq!(gui.database, "translation_manager.db");
+        assert_eq!(gui.textures, "texturas");
+        assert_eq!(gui.output, "output/Strawberry_Patched.iso");
+        assert!(gui.auto_threads, "threads should be automatic by default");
     }
 }

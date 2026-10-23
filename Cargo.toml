@@ -1,5 +1,10 @@
 [workspace]
-members = ["crates/straw-core", "crates/straw-db", "crates/straw-patcher"]
+members = [
+    "crates/straw-core",
+    "crates/straw-db",
+    "crates/straw-icon",
+    "crates/straw-patcher",
+]
 resolver = "2"
 
 [workspace.package]

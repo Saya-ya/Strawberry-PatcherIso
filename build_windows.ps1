@@ -12,6 +12,9 @@ $ErrorActionPreference = "Stop"
 #   cargo build --release --target x86_64-pc-windows-gnu -p straw-patcher
 #   cp target/x86_64-pc-windows-gnu/release/straw-patcher.exe dist/StrawPatcher.exe
 #
+# Either way the studio icon and the version information are embedded by the
+# build script, so the executable is not a generic one.
+#
 $target = "x86_64-pc-windows-msvc"
 
 rustup target add $target

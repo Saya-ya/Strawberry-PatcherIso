@@ -12,3 +12,6 @@ output/
 *.bin
 *.exe
 *.db
+
+# Icono generado a partir del logo (se reconstruye en cada build)
+icon.ico

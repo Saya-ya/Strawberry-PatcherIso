@@ -14,6 +14,7 @@ use straw_core::{
     patch_translated_scripts_with_options, spanish_glyph_map, GlyphMap,
 };
 
+mod branding;
 mod gui;
 
 #[derive(Debug, Parser)]
@@ -49,9 +50,11 @@ struct Args {
 fn main() -> Result<()> {
     let args = Args::parse();
     if !args.cli {
+        let mut options = eframe::NativeOptions::default();
+        options.viewport.icon = Some(std::sync::Arc::new(branding::window_icon()));
         return eframe::run_native(
             "StrawPatcher — Strawberry Panic!",
-            eframe::NativeOptions::default(),
+            options,
             Box::new(|_cc| Ok(Box::new(gui::PatcherGui::default()))),
         )
         .map_err(|err| anyhow::anyhow!("No se pudo iniciar la interfaz: {err}"));
