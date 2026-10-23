@@ -1,17 +1,11 @@
-# Python
-__pycache__/
-*.py[cod]
+# Rust
+/target/
 
-# Compilación de PyInstaller
-build/
+# Ejecutables generados
 dist/
 
 # Directorios de trabajo locales del parcheador
-work/
 output/
-input/*.iso
-input/Data.bin
-input/SLPS*
 
 # Archivos pesados que no deben subirse a git
 *.iso

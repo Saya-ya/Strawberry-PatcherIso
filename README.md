@@ -15,7 +15,7 @@ This is an open-source, standalone patcher for the PS2 game *"Strawberry Panic!"
 
 ### For the End User (No Technical Knowledge Required)
 
-If you just want to apply the translation, **you don't need to install Python or use the command line**.
+If you just want to apply the translation, you don't need to install development tools or use the command line.
 
 1. Download the `.zip` file from the **Releases** section on this GitHub page.
 2. Extract the file.
@@ -36,7 +36,7 @@ The patcher automatically reads the **target language** from the translation dat
 | **English (en)** | No glyph mapping needed. English uses only ASCII characters present in the game's font. |
 | **Custom** | Loads a user-defined glyph map from the database (`settings.custom_glyph_map`). The webapp allows configuring this mapping for any language whose characters fit in Latin-1 (e.g. Polish `ą→Г, ć→Д, ę→Е, ł→Ж`). PCSX2 texture replacement must be configured accordingly. |
 
-The detected language and its active glyph mapping are displayed in the **Glyph Map** panel of the GUI before patching, so you can verify the correct language is being applied.
+The detected language and active glyph mapping are applied automatically from the database during patching.
 
 ---
 
@@ -44,28 +44,28 @@ The detected language and its active glyph mapping are displayed in the **Glyph 
 
 If you want to modify the patcher or build it yourself:
 
-#### Requirements
-- Python 3.8 or higher.
-- Standard Python libraries (the project mostly relies on built-in libraries like `tkinter`, `sqlite3`, `csv`, `multiprocessing`).
-- Optional: `pyinstaller` to build the `.exe`.
+#### Rust patcher (native GUI and translation pipeline)
 
-#### Running from Source
-To start the GUI:
+The Rust command-line patcher uses the current `StrawTraduccion` core: it reads translations and language settings from the SQLite database, rebuilds scripts and the ELF from the originals, applies optional texture patches, then creates the output ISO. Keep the original ISO, `Data.bin` and `SLPS_256.11` in `originales/`; keep `manifest.json` and the PNG files it references in `texturas/`.
+
 ```bash
-python gui.py
+cargo run --release -p straw-patcher
 ```
 
-To use the command-line version without a GUI:
-```bash
-python main.py --iso your_original_game.iso --db translation_db.db
-```
+The GUI lets you choose `originales/`, the `.db`, `texturas/` and the output ISO. The texture step is skipped when `texturas/manifest.json` is absent. To build the Windows x64 executable, run `./build_windows.ps1` on Windows with the Rust MSVC toolchain installed; it writes `dist/StrawPatcher.exe`. The executable and patching pipeline are Rust and do not require Python.
 
-#### Build the Executable (.exe)
+#### Hilos y carpeta de trabajo
+
+El parcheo usa varios núcleos por defecto. En la interfaz gráfica puedes activar **"Ajuste automático de hilos"** (usa los núcleos disponibles, hasta 8) o fijar un número manualmente.
+
+Desde la consola:
+
+- `--workers N` — número de hilos (`0` = detección automática, por defecto). Los scripts y las texturas se parchean en paralelo; el resultado es **idéntico byte a byte** al parcheo secuencial.
+- `--work-dir RUTA` — dónde crear los archivos intermedios (`Data_patched.bin` ocupa unos 2 GB). Por defecto se usa la carpeta de la ISO de salida, no la carpeta temporal del sistema, que suele estar en memoria y puede ser demasiado pequeña.
+
 ```bash
-pip install pyinstaller
-pyinstaller StrawPatcher.spec
+cargo run --release -p straw-patcher -- --cli --workers 4 --work-dir D:/straw_work
 ```
-The `StrawPatcher.exe` file will be generated in the `dist/` folder.
 
 ---
 ---
@@ -76,7 +76,7 @@ Este es un parcheador "standalone" de código abierto para el juego de PS2 *"Str
 
 ### Para el Usuario Final (No requiere conocimientos técnicos)
 
-Si solo quieres aplicar la traducción, **no necesitas instalar Python ni usar la línea de comandos**.
+Si solo quieres aplicar la traducción, no necesitas instalar herramientas de desarrollo ni usar la línea de comandos.
 
 1. Descarga el archivo `.zip` desde la sección de **Releases** en este GitHub.
 2. Descomprime el archivo.
@@ -97,7 +97,7 @@ El parcheador lee automáticamente el **idioma de traducción** desde la base de
 | **Inglés (en)** | No necesita mapeo de glifos. El inglés usa solo caracteres ASCII presentes en la fuente del juego. |
 | **Personalizado (custom)** | Carga un mapa de glifos definido por el usuario desde la base de datos (`settings.custom_glyph_map`). La webapp permite configurar este mapeo para cualquier idioma cuyos caracteres quepan en Latin-1 (ej. polaco: `ą→Г, ć→Д, ę→Е, ł→Ж`). El reemplazo de texturas en PCSX2 debe configurarse de forma correspondiente. |
 
-El idioma detectado y su mapeo de glifos activo se muestran en el panel **Glyph Map** de la interfaz antes de parchear, para que puedas verificar que se está aplicando el idioma correcto.
+El parcheador aplica automáticamente el idioma y el mapeo de glifos configurados en la base de datos.
 
 ---
 
@@ -105,25 +105,25 @@ El idioma detectado y su mapeo de glifos activo se muestran en el panel **Glyph 
 
 Si quieres modificar el parcheador o compilarlo por ti mismo:
 
-#### Requisitos
-- Python 3.8 o superior.
-- Librerías estándar de Python (el proyecto usa mayoritariamente librerías integradas como `tkinter`, `sqlite3`, `csv`, `multiprocessing`).
-- Opcional: `pyinstaller` para construir el `.exe`.
+#### Parcheador Rust (interfaz gráfica y pipeline de traducción)
 
-#### Ejecutar desde el código fuente
-Para iniciar la interfaz gráfica:
+El parcheador Rust reutiliza el núcleo actual de `StrawTraduccion`: lee traducciones e idioma desde la base SQLite, reconstruye scripts y ELF desde los originales, aplica opcionalmente los parches de texturas y genera la ISO. Coloca la ISO original, `Data.bin` y `SLPS_256.11` en `originales/`; deja `manifest.json` y los PNG referenciados en `texturas/`.
+
 ```bash
-python gui.py
+cargo run --release -p straw-patcher
 ```
 
-Para usar la versión de línea de comandos sin interfaz:
-```bash
-python main.py --iso tu_juego_original.iso --db base_traduccion.db
-```
+La interfaz permite elegir `originales/`, la `.db`, `texturas/` y la ISO de salida. Si no existe `texturas/manifest.json`, se omite esa etapa. Para compilar el ejecutable Windows x64, ejecuta `./build_windows.ps1` en Windows con Rust MSVC instalado; genera `dist/StrawPatcher.exe`. El ejecutable y el proceso de parcheo están hechos en Rust y no requieren Python.
 
-#### Compilar el ejecutable (.exe)
+#### Hilos y carpeta de trabajo
+
+El parcheo usa varios núcleos por defecto. En la interfaz gráfica puedes activar **"Ajuste automático de hilos"** (usa los núcleos disponibles, hasta 8) o fijar un número manualmente.
+
+Desde la consola:
+
+- `--workers N` — número de hilos (`0` = detección automática, por defecto). Los scripts y las texturas se parchean en paralelo; el resultado es **idéntico byte a byte** al parcheo secuencial.
+- `--work-dir RUTA` — dónde crear los archivos intermedios (`Data_patched.bin` ocupa unos 2 GB). Por defecto se usa la carpeta de la ISO de salida, no la carpeta temporal del sistema, que suele estar en memoria y puede ser demasiado pequeña.
+
 ```bash
-pip install pyinstaller
-pyinstaller StrawPatcher.spec
+cargo run --release -p straw-patcher -- --cli --workers 4 --work-dir D:/straw_work
 ```
-El archivo `StrawPatcher.exe` aparecerá en la carpeta `dist/`.
